@@ -4,7 +4,10 @@ import numpy as np
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-from geneticalgorithm import geneticalgorithm as ga
+import optuna
+
+# Disable Optuna's default logging messages to keep the terminal clean
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 @st.cache_data
@@ -37,8 +40,8 @@ def generate_mock_data(num_records=750):
 
 def get_trained_model_and_metrics():
     """
-    This function orchestrates the data generation, GA optimization,
-    and final model training. It's the public interface of this module.
+    This function orchestrates data generation, Bayesian optimization using Optuna,
+    and final model training. It is the public interface of this module.
     """
     df = generate_mock_data()
     X = df.drop('diagnosis', axis=1)
@@ -46,57 +49,56 @@ def get_trained_model_and_metrics():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
 
-    def fitness_function(X_ga):
-        """The function to be optimized by the GA."""
-        n_estimators = int(X_ga[0])
-        max_depth = int(X_ga[1])
-        if n_estimators < 10 or max_depth < 2:
-            return -0.0
+    def objective(trial):
+        """
+        The objective function for Optuna to optimize.
+        A 'trial' is a single run with a specific set of hyperparameters.
+        """
+        # Optuna intelligently suggests the next hyperparameters to try.
+        n_estimators = trial.suggest_int('n_estimators', 10, 200)
+        max_depth = trial.suggest_int('max_depth', 2, 30)
+
         model = RandomForestClassifier(
             n_estimators=n_estimators, max_depth=max_depth, random_state=42)
-        score = cross_val_score(model, X_train, y_train, cv=3)
-        return -np.mean(score)
 
-    # The corrected run_ga_optimization function in src/ml_model.py
+        # We return the mean cross-validation score, which Optuna will try to maximize.
+        score = cross_val_score(model, X_train, y_train, cv=3)
+        return np.mean(score)
 
     @st.cache_resource
-    def run_ga_optimization():
-        """Runs the GA and caches the result."""
-        varbound = np.array([[10, 200], [2, 30]])
+    def run_optuna_optimization():
+        """
+        Runs the Bayesian optimization and caches the best parameters.
+        This is significantly faster than the Genetic Algorithm.
+        """
+        # Create a "study" to track the optimization process.
+        # We specify we want to 'maximize' the objective function's return value.
+        study = optuna.create_study(direction='maximize')
 
-        algorithm_params = {
-            'max_num_iteration': 50,
-            'population_size': 20,
-            'mutation_probability': 0.1,
-            'elit_ratio': 0.1,
-            'crossover_probability': 0.8,
-            'parents_portion': 0.3,
-            'crossover_type': 'uniform',
-            'max_iteration_without_improv': None
-        }
+        # Start the optimization. n_trials is the number of different hyperparameter
+        # combinations Optuna will test. 50 is a good starting point.
+        study.optimize(objective, n_trials=50)
 
-        ga_model = ga(function=fitness_function, dimension=2, variable_type='int',
-                      variable_boundaries=varbound, algorithm_parameters=algorithm_params)
+        # After the study is complete, the best parameters are stored here.
+        return study.best_params
 
-        ga_model.run()
+    # Run the optimization to get the best hyperparameters.
+    # The result will be a dictionary, e.g., {'n_estimators': 147, 'max_depth': 24}
+    best_params = run_optuna_optimization()
 
-        # The results are stored in the 'output_dict' attribute under the key 'variable'
-        return ga_model.output_dict['variable']
-
-    best_params = run_ga_optimization()
-
-    # Train the final model with the best parameters
+    # Train the final model using the best parameters found by Optuna.
     ml_model = RandomForestClassifier(
-        n_estimators=int(best_params[0]),
-        max_depth=int(best_params[1]),
+        n_estimators=best_params['n_estimators'],
+        max_depth=best_params['max_depth'],
         random_state=42
     )
     ml_model.fit(X_train, y_train)
 
-    # Evaluate and return results
+    # Evaluate the final model's performance on the unseen test data.
     y_pred = ml_model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
 
+    # Return everything the main app needs.
     return {
         "model": ml_model,
         "accuracy": accuracy,
