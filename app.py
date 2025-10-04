@@ -1,4 +1,3 @@
-# app.py
 """
 This is the main application file for the Hybrid Arthritis Diagnosis System.
 It uses Streamlit to create the user interface and orchestrates calls to the
@@ -54,7 +53,7 @@ st.sidebar.write(f"Max Depth (max_depth): {best_params['max_depth']}")
 st.sidebar.subheader("ML Model Performance")
 st.sidebar.write(f"Accuracy on Test Data: {model_accuracy:.2%}")
 
-st.title("Hybrid Arthritis Diagnosis System")
+st.title("Arthritis Diagnosis System")
 st.write("This system combines a rule-based expert system with a machine learning model to provide a comprehensive diagnosis.")
 st.write("Disclaimer: Not a substitute for professional medical advice.")
 
